@@ -1,0 +1,93 @@
+#!/bin/bash
+
+PID_FILE="${TRIM_PKGVAR}/softwarehub.pid"
+LOG_FILE="${TRIM_PKGVAR}/softwarehub.log"
+NODE_BIN="/var/apps/nodejs_v22/target/bin/node"
+APP_ENTRY="${TRIM_APPDEST}/runtime/server.mjs"
+
+write_error() {
+  if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+    printf '%s\n' "$1" >> "${TRIM_TEMP_LOGFILE}"
+  fi
+}
+
+is_running() {
+  [ -f "${PID_FILE}" ] || return 1
+  pid="$(tr -d '[:space:]' < "${PID_FILE}")"
+  [ -n "${pid}" ] || return 1
+  kill -0 "${pid}" 2>/dev/null || return 1
+  [ -r "/proc/${pid}/cmdline" ] || return 1
+  tr '\0' ' ' < "/proc/${pid}/cmdline" | grep -Fq -- "${APP_ENTRY}"
+}
+
+is_healthy() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS --max-time 2 "http://127.0.0.1:${TRIM_SERVICE_PORT:-31880}/api/health" >/dev/null 2>&1
+    return $?
+  fi
+  return 0
+}
+
+case "${1:-}" in
+  start)
+    if is_running; then
+      exit 0
+    fi
+    rm -f "${PID_FILE}"
+    if [ ! -x "${NODE_BIN}" ]; then
+      write_error "未找到 Node.js 22 运行环境：${NODE_BIN}"
+      exit 1
+    fi
+    if [ ! -f "${APP_ENTRY}" ]; then
+      write_error "应用入口不存在：${APP_ENTRY}"
+      exit 1
+    fi
+    username_file="${TRIM_PKGVAR}/initial-admin.username"
+    password_file="${TRIM_PKGVAR}/initial-admin.password"
+    APP_HOST="::" APP_IPV6_ONLY="false" APP_PORT="${TRIM_SERVICE_PORT:-31880}" APP_DATA_DIR="${TRIM_PKGVAR}" \
+      APP_ADMIN_USERNAME_FILE="${username_file}" APP_ADMIN_PASSWORD_FILE="${password_file}" \
+      nohup "${NODE_BIN}" "${APP_ENTRY}" >> "${LOG_FILE}" 2>&1 &
+    pid=$!
+    printf '%s\n' "${pid}" > "${PID_FILE}"
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      if ! kill -0 "${pid}" 2>/dev/null; then
+        break
+      fi
+      if is_healthy; then
+        exit 0
+      fi
+      sleep 1
+    done
+    rm -f "${PID_FILE}"
+    write_error "软件仓库启动失败，请查看 ${LOG_FILE}"
+    exit 1
+    ;;
+  stop)
+    if ! is_running; then
+      rm -f "${PID_FILE}"
+      exit 0
+    fi
+    pid="$(tr -d '[:space:]' < "${PID_FILE}")"
+    kill "${pid}" 2>/dev/null || true
+    for _ in 1 2 3 4 5; do
+      if ! kill -0 "${pid}" 2>/dev/null; then
+        rm -f "${PID_FILE}"
+        exit 0
+      fi
+      sleep 1
+    done
+    kill -9 "${pid}" 2>/dev/null || true
+    rm -f "${PID_FILE}"
+    exit 0
+    ;;
+  status)
+    if is_running; then
+      exit 0
+    fi
+    rm -f "${PID_FILE}"
+    exit 3
+    ;;
+  *)
+    exit 1
+    ;;
+esac

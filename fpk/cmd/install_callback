@@ -1,0 +1,21 @@
+#!/bin/bash
+
+USERNAME_FILE="${TRIM_PKGVAR}/initial-admin.username"
+PASSWORD_FILE="${TRIM_PKGVAR}/initial-admin.password"
+username="${wizard_admin_username:-admin}"
+password="${wizard_admin_password:-}"
+
+if ! printf '%s' "${username}" | grep -Eq '^[A-Za-z0-9._-]{3,32}$'; then
+  printf '%s\n' "管理员账号格式无效" >> "${TRIM_TEMP_LOGFILE}"
+  exit 1
+fi
+password_length="${#password}"
+if [ "${password_length}" -lt 8 ] || [ "${password_length}" -gt 128 ] || printf '%s' "${password}" | grep -q '[[:cntrl:]]'; then
+  printf '%s\n' "管理员密码须为 8–128 位且不能包含控制字符" >> "${TRIM_TEMP_LOGFILE}"
+  exit 1
+fi
+
+umask 077
+printf '%s' "${username}" > "${USERNAME_FILE}"
+printf '%s' "${password}" > "${PASSWORD_FILE}"
+exit 0

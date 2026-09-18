@@ -1,0 +1,21 @@
+{
+  "name": "softwarehub-fnos",
+  "version": "1.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:server": "node server.mjs",
+    "build": "vite build",
+    "start": "node server.mjs",
+    "test": "node --test",
+    "package:fpk": "node scripts/package-fpk.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "latest",
+    "@lucide/vue": "latest",
+    "vite": "latest",
+    "vue": "latest",
+    "vue-router": "latest"
+  }
+}

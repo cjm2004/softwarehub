@@ -1,0 +1,11 @@
+[
+  {
+    "stepTitle": "升级软件仓库",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "升级会保留 SQLite 数据库、上传图片和管理员账号。"
+      }
+    ]
+  }
+]

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.data/
+outputs/*.fpk
+*.fpk
+tools/fnpack.exe
+fpk/app/runtime/*
+!fpk/app/runtime/.gitkeep
+.test-data/
+.smoke-data*/
+.preview-data/
+*.log
+.env
+.env.*
+.workbuddy/

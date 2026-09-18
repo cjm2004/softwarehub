@@ -1,0 +1,30 @@
+[
+  {
+    "stepTitle": "初始化软件仓库",
+    "items": [
+      {
+        "type": "text",
+        "field": "wizard_admin_username",
+        "label": "管理员账号",
+        "initValue": "admin",
+        "rules": [
+          { "required": true, "message": "请输入管理员账号" },
+          { "pattern": "^[A-Za-z0-9._-]{3,32}$", "message": "账号须为 3–32 位英数字或 ._-" }
+        ]
+      },
+      {
+        "type": "password",
+        "field": "wizard_admin_password",
+        "label": "管理员密码",
+        "rules": [
+          { "required": true, "message": "请输入管理员密码" },
+          { "pattern": "^[^\\x00-\\x1F\\x7F]{8,128}$", "message": "密码须为 8–128 位且不能包含控制字符" }
+        ]
+      },
+      {
+        "type": "tips",
+        "helpText": "应用将使用 Node.js 22 与内置 SQLite，不需要额外数据库。安装后请从飞牛桌面打开。"
+      }
+    ]
+  }
+]
