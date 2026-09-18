@@ -4,8 +4,8 @@ import { ArchiveRestore, BarChart3, ChevronDown, ChevronUp, ClipboardList, Eye, 
 
 const loggedIn=ref(false), initialized=ref(false), rememberCredentials=ref(false), credentials=ref({username:"admin",password:""}), error=ref(""), notice=ref(""), tab=ref("dashboard");
 const rememberedCredentialsKey="softwarehub.admin.credentials";
-function loadRememberedCredentials(){try{const saved=JSON.parse(localStorage.getItem(rememberedCredentialsKey)||"null");if(saved?.username&&typeof saved.password==="string"){credentials.value={username:saved.username,password:saved.password};rememberCredentials.value=true}}catch{localStorage.removeItem(rememberedCredentialsKey)}}
-function persistRememberedCredentials(){if(rememberCredentials.value)localStorage.setItem(rememberedCredentialsKey,JSON.stringify({username:credentials.value.username,password:credentials.value.password}));else localStorage.removeItem(rememberedCredentialsKey)}
+function loadRememberedCredentials(){try{const saved=JSON.parse(localStorage.getItem(rememberedCredentialsKey)||"null");if(saved?.username){credentials.value.username=String(saved.username);rememberCredentials.value=true;localStorage.setItem(rememberedCredentialsKey,JSON.stringify({username:credentials.value.username}))}}catch{localStorage.removeItem(rememberedCredentialsKey)}}
+function persistRememberedCredentials(){if(rememberCredentials.value)localStorage.setItem(rememberedCredentialsKey,JSON.stringify({username:credentials.value.username}));else localStorage.removeItem(rememberedCredentialsKey)}
 const software=ref([]), categories=ref([]), settings=ref({}), statistics=ref(null), announcements=ref([]), slides=ref([]), media=ref([]), auditLogs=ref([]), editing=ref(null), editingCategory=ref(null), editingAnnouncement=ref(null), editingSlide=ref(null), links=ref([]), versions=ref([]);
 const accountForm=ref({username:"",currentPassword:"",newPassword:""}), selectedSoftware=ref([]), linkCheckResults=ref([]), importText=ref("");
 const homepageSectionLabels={announcements:"公告",carousel:"轮播",recommended:"推荐",updated:"最近更新",categories:"分类分区"};

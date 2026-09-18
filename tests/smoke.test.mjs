@@ -246,6 +246,8 @@ test("advanced operations, scheduling, statistics, RSS and backup compatibility 
   assert.equal(tags.includes("开源软件"), true);
   const taggedList = await fetch(`${base}/api/public/software?tag=${encodeURIComponent("开源软件")}`).then(r => r.json());
   assert.deepEqual(taggedList.map(item => item.slug), ["tagged-tool"]);
+  const platformSearch = await fetch(`${base}/api/public/software?q=${encodeURIComponent("飞牛 NAS")}`).then(r => r.json());
+  assert.equal(platformSearch.some(item => item.slug === "tagged-tool"), true);
   const unrelatedTag = await fetch(`${base}/api/public/software?tag=${encodeURIComponent("付费软件")}`).then(r => r.json());
   assert.equal(unrelatedTag.length, 0);
 
@@ -292,11 +294,18 @@ test("advanced operations, scheduling, statistics, RSS and backup compatibility 
   assert.deepEqual(csvImported.platforms, ["Linux"]);
   assert.deepEqual(csvImported.tags, ["绿色版"]);
 
+  const invalidBulkCategory = await adminJson("/api/admin/software/bulk", {
+    method: "POST",
+    body: JSON.stringify({ ids: [jsonImportedId], categoryId: 999999 })
+  });
+  assert.equal(invalidBulkCategory.status, 400);
+
   const bulkResponse = await adminJson("/api/admin/software/bulk", {
     method: "POST",
-    body: JSON.stringify({ ids: [jsonImportedId, csvImportedId], status: "PUBLISHED", featured: true })
+    body: JSON.stringify({ ids: [jsonImportedId, csvImportedId, jsonImportedId], status: "PUBLISHED", featured: true })
   });
   assert.equal(bulkResponse.status, 200);
+  assert.equal((await bulkResponse.json()).count, 2);
   const bulkRows = await adminJson("/api/admin/software").then(r => r.json());
   assert.equal(bulkRows.filter(item => [jsonImportedId, csvImportedId].includes(item.id)).every(item => item.status === "PUBLISHED" && item.featured === 1), true);
 

@@ -4,6 +4,7 @@ import { readFile, unlink, writeFile } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { DatabaseSync } from "node:sqlite";
 
 const ROOT = resolve(import.meta.dirname);
@@ -291,11 +292,11 @@ const json = (res, status, body, headers = {}) => {
   res.end(JSON.stringify(body));
 };
 
-const readJson = async req => {
+const readJson = async (req, maxBytes = 3 * 1024 * 1024) => {
   let body = "";
   for await (const chunk of req) {
     body += chunk;
-    if (body.length > 3 * 1024 * 1024) throw new Error("REQUEST_TOO_LARGE");
+    if (body.length > maxBytes) throw new Error("REQUEST_TOO_LARGE");
   }
   return body ? JSON.parse(body) : {};
 };
@@ -399,8 +400,21 @@ async function assertPublicTarget(url) {
 }
 async function inspectDownloadLink(link) {
   const checkedAt = new Date().toISOString(); let status = "ERROR", message = "连接失败";
-  try { const target=validateHttpUrl(link.target_url); if(!target)throw new Error("无效下载地址"); await assertPublicTarget(target); const response=await fetch(target,{method:"HEAD",redirect:"manual",signal:AbortSignal.timeout(8000)}); status=response.ok||response.status>=300&&response.status<400?"OK":"HTTP_ERROR";message=`HTTP ${response.status}`; } catch(error){message=String(error?.message||"连接失败").slice(0,180)}
-  const failures=status==="OK"?0:Number(link.consecutive_failures||0)+1; const autoDisable=settings().link_auto_disable!=="0"&&failures>=settingNumber("link_failure_threshold",3,1,20);
+  try {
+    const target = validateHttpUrl(link.target_url);
+    if (!target) throw new Error("无效下载地址");
+    await assertPublicTarget(target);
+    let response = await fetch(target, { method: "HEAD", redirect: "manual", signal: AbortSignal.timeout(8000) });
+    if ([405, 501].includes(response.status)) {
+      response = await fetch(target, { method: "GET", headers: { Range: "bytes=0-0" }, redirect: "manual", signal: AbortSignal.timeout(8000) });
+    }
+    status = response.ok || response.status >= 300 && response.status < 400 ? "OK" : "HTTP_ERROR";
+    message = `HTTP ${response.status}`;
+  } catch (error) {
+    message = String(error?.message || "连接失败").slice(0, 180);
+  }
+  const failures = status === "OK" ? 0 : Number(link.consecutive_failures || 0) + 1;
+  const autoDisable = settings().link_auto_disable !== "0" && failures >= settingNumber("link_failure_threshold", 3, 1, 20);
   db.prepare("UPDATE download_link SET last_checked_at=?,last_check_status=?,last_check_message=?,consecutive_failures=?,status=CASE WHEN ? THEN 'DISABLED' ELSE status END WHERE id=?").run(checkedAt,status,message,failures,autoDisable?1:0,link.id);
   return {id:link.id,name:link.name,status,message,checkedAt,failures,autoDisabled:autoDisable};
 }
@@ -511,9 +525,9 @@ async function handleApi(req, res, url) {
     const sort = ["updated", "downloads", "name"].includes(url.searchParams.get("sort")) ? url.searchParams.get("sort") : "featured";
     const order = sort === "downloads" ? "s.download_count DESC,s.updated_at DESC" : sort === "name" ? "s.name COLLATE NOCASE ASC" : sort === "updated" ? "s.updated_at DESC,s.sort_order ASC" : "s.featured DESC,s.sort_order ASC,s.updated_at DESC";
     const rows = db.prepare(`SELECT s.*,c.name AS category_name,c.slug AS category_slug FROM software s LEFT JOIN category c ON c.id=s.category_id
-      WHERE s.status='PUBLISHED' AND (?='' OR s.name LIKE ? OR s.summary LIKE ?) AND (?='' OR c.slug=?) AND (?='' OR s.platforms LIKE ?) AND (?='' OR s.tags LIKE ?) ORDER BY ${order}`)
-      .all(q, `%${q}%`, `%${q}%`, category, category, platform, `%${JSON.stringify(platform).slice(1, -1)}%`, tag, `%${JSON.stringify(tag).slice(1, -1)}%`);
-    if (q) db.prepare("INSERT INTO search_event(query,result_count,created_at) VALUES(?,?,?)").run(q.slice(0,120),rows.length,Date.now());
+      WHERE s.status='PUBLISHED' AND (?='' OR s.name LIKE ? OR s.summary LIKE ? OR s.description LIKE ? OR s.platforms LIKE ? OR s.tags LIKE ?) AND (?='' OR c.slug=?) AND (?='' OR s.platforms LIKE ?) AND (?='' OR s.tags LIKE ?) ORDER BY ${order}`)
+      .all(q, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, category, category, platform, `%${JSON.stringify(platform).slice(1, -1)}%`, tag, `%${JSON.stringify(tag).slice(1, -1)}%`);
+    if (q && !rateLimited(req, "search-event", 60, 60_000)) db.prepare("INSERT INTO search_event(query,result_count,created_at) VALUES(?,?,?)").run(q.slice(0,120),rows.length,Date.now());
     return json(res, 200, rows.map(safeSoftware));
   }
   let m = routePattern(path, "/api/public/software/:slug");
@@ -522,7 +536,7 @@ async function handleApi(req, res, url) {
     const row = db.prepare("SELECT s.*,c.name AS category_name FROM software s LEFT JOIN category c ON c.id=s.category_id WHERE s.slug=? AND s.status='PUBLISHED'").get(m.slug);
     if (!row) return json(res, 404, { error: "NOT_FOUND" });
     db.prepare("UPDATE software SET view_count=view_count+1 WHERE id=?").run(row.id);
-    db.prepare("INSERT INTO page_view(software_id,page_type,created_at) VALUES(?,?,?)").run(row.id,"SOFTWARE",Date.now());
+    if (!rateLimited(req, "page-view", 120, 60_000)) db.prepare("INSERT INTO page_view(software_id,page_type,created_at) VALUES(?,?,?)").run(row.id,"SOFTWARE",Date.now());
     const channels = db.prepare("SELECT id,name,channel_type,require_purchase FROM download_link WHERE software_id=? AND status='ACTIVE' ORDER BY sort_order,id").all(row.id);
     const versions = db.prepare("SELECT id,version,file_size,changelog,created_at FROM software_version WHERE software_id=? AND status='ACTIVE' ORDER BY sort_order,id DESC").all(row.id).map(version => ({
       ...version,
@@ -683,7 +697,27 @@ async function handleApi(req, res, url) {
     const adminId=requireAdmin(req,res);if(!adminId)return; const body=await readJson(req); const rawItems=Array.isArray(body.items)?body.items:typeof body.csv==="string"?parseCsv(body.csv):[]; const items=rawItems.map(item=>({...item,platforms:Array.isArray(item.platforms)?item.platforms:String(item.platforms||"").split(/[|,]/).map(x=>x.trim()).filter(Boolean),tags:Array.isArray(item.tags)?item.tags:String(item.tags||"").split(/[|,]/).map(x=>x.trim()).filter(Boolean)})); if(items.length>200)return json(res,413,{error:"TOO_MANY_ITEMS"}); const created=[]; try { db.exec("BEGIN IMMEDIATE"); for(const item of items){ if(!item.name||!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(String(item.slug||"")))continue; const status=["DRAFT","PUBLISHED","OFFLINE"].includes(item.status)?item.status:"DRAFT"; const info=db.prepare("INSERT INTO software(name,slug,version,platforms,summary,description,status,featured,sort_order,tags,download_note) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(String(item.name).trim(),String(item.slug).trim(),String(item.version||""),JSON.stringify(sanitizePlatforms(item.platforms)),String(item.summary||""),String(item.description||""),status,item.featured?1:0,Number(item.sortOrder||0),JSON.stringify(normalizeTags(item.tags)),limitedText(item.downloadNote,1200)); const softwareId=Number(info.lastInsertRowid); if(Array.isArray(item.links))for(const link of item.links){const target=validateHttpUrl(link.targetUrl||link.target_url);if(target&&link.name)db.prepare("INSERT INTO download_link(software_id,name,channel_type,target_url,extract_code,sort_order,status) VALUES(?,?,?,?,?,?,?)").run(softwareId,String(link.name).slice(0,120),["OFFICIAL","DIRECT","BAIDU","QUARK","ALIYUN"].includes(link.channelType||link.channel_type)?(link.channelType||link.channel_type):"DIRECT",target.href,String(link.extractCode||link.extract_code||""),Number(link.sortOrder||link.sort_order||0),"ACTIVE")} created.push(softwareId); } db.exec("COMMIT"); } catch(error){try{db.exec("ROLLBACK")}catch{};return json(res,400,{error:"IMPORT_FAILED",detail:String(error.message||"").slice(0,160)})} audit(req,adminId,"IMPORT","software","",`导入 ${created.length} 个应用`); return json(res,200,{created});
   }
   if (req.method === "POST" && path === "/api/admin/software/bulk") {
-    const adminId=requireAdmin(req,res);if(!adminId)return; const b=await readJson(req); const ids=(Array.isArray(b.ids)?b.ids:[]).map(Number).filter(Boolean); if(!ids.length)return json(res,400,{error:"NO_ITEMS"}); const marks=ids.map(()=>"?").join(","); const fields=[]; if(["PUBLISHED","DRAFT","OFFLINE"].includes(b.status)){db.prepare(`UPDATE software SET status=? WHERE id IN (${marks})`).run(b.status,...ids);fields.push("status")} if(typeof b.featured==="boolean"){db.prepare(`UPDATE software SET featured=? WHERE id IN (${marks})`).run(b.featured?1:0,...ids);fields.push("featured")} if(b.categoryId!==undefined){db.prepare(`UPDATE software SET category_id=? WHERE id IN (${marks})`).run(b.categoryId||null,...ids);fields.push("category")} if(b.delete===true){db.prepare(`DELETE FROM software WHERE id IN (${marks})`).run(...ids);fields.push("delete")} audit(req,adminId,"BULK","software",ids.join(","),fields.join(",")); return json(res,200,{ok:true,count:ids.length,fields});
+    const adminId = requireAdmin(req, res); if (!adminId) return;
+    const b = await readJson(req);
+    const ids = [...new Set((Array.isArray(b.ids) ? b.ids : []).map(Number).filter(id => Number.isInteger(id) && id > 0))];
+    if (!ids.length) return json(res, 400, { error: "NO_ITEMS" });
+    if (b.categoryId !== undefined && b.categoryId !== null && (!Number.isInteger(Number(b.categoryId)) || !db.prepare("SELECT id FROM category WHERE id=?").get(Number(b.categoryId)))) return json(res, 400, { error: "INVALID_CATEGORY" });
+    const marks = ids.map(() => "?").join(",");
+    const fields = [];
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      if (["PUBLISHED", "DRAFT", "OFFLINE"].includes(b.status)) { db.prepare(`UPDATE software SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id IN (${marks})`).run(b.status, ...ids); fields.push("status"); }
+      if (typeof b.featured === "boolean") { db.prepare(`UPDATE software SET featured=?,updated_at=CURRENT_TIMESTAMP WHERE id IN (${marks})`).run(b.featured ? 1 : 0, ...ids); fields.push("featured"); }
+      if (b.categoryId !== undefined) { db.prepare(`UPDATE software SET category_id=?,updated_at=CURRENT_TIMESTAMP WHERE id IN (${marks})`).run(b.categoryId || null, ...ids); fields.push("category"); }
+      if (b.delete === true) { db.prepare(`DELETE FROM software WHERE id IN (${marks})`).run(...ids); fields.push("delete"); }
+      db.exec("COMMIT");
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch {}
+      console.error("Bulk software update failed", error);
+      return json(res, 400, { error: "BULK_UPDATE_FAILED" });
+    }
+    audit(req, adminId, "BULK", "software", ids.join(","), fields.join(","));
+    return json(res, 200, { ok: true, count: ids.length, fields });
   }
   if (req.method === "POST" && path === "/api/admin/software") {
     const adminId = requireAdmin(req, res); if (!adminId) return;
@@ -1043,6 +1077,12 @@ function listen(host, allowIpv4Fallback = false) {
   server.listen(options);
 }
 
+applySchedules();
+pruneAnalytics();
 listen(HOST, HOST === "::");
 restartLinkCheckTimer();
+setInterval(() => {
+  applySchedules();
+  pruneAnalytics();
+}, 60_000);
 setTimeout(() => scheduledLinkCheck().catch(error => console.error("Initial link check failed", error)), 15_000);

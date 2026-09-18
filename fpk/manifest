@@ -1,5 +1,5 @@
 appname=com.softwarehub.fnos
-version=1.3.0
+version=1.3.1
 display_name=软件仓库
 desc=面向飞牛 NAS 的软件资源发布与下载管理站，内置 SQLite 数据库。
 platform=x86
@@ -15,4 +15,4 @@ install_dep_apps=nodejs_v22
 desktop_uidir=ui
 desktop_applaunchname=com.softwarehub.fnos.main
 ctl_stop=true
-changelog=1.3.0：新增首页可视化排序、标签筛选、搜索与访问统计、下载链接自动巡检、批量操作、CSV/JSON 导入、定时发布、RSS 订阅与兼容备份恢复。
+changelog=1.3.1：修复链接巡检兼容性、启动定时任务、批量操作事务与校验、统计限流、备份大小限制和后台记住密码问题。
