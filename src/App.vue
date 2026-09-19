@@ -59,6 +59,6 @@ onMounted(async () => {
   <main><RouterView /></main>
   <footer class="site-footer">
     <div><strong>{{ site.footer_copyright || site.site_name }}</strong><span>{{ site.site_description }}</span><span v-if="site.footer_icp">{{ site.footer_icp }}</span></div>
-    <div class="footer-links"><a href="/rss.xml" target="_blank" rel="noopener noreferrer">RSS 更新</a><a v-for="link in footerLinks" :key="link.url" :href="link.url" rel="noopener noreferrer">{{ link.name }}</a><RouterLink to="/admin" class="footer-admin"><Settings :size="15" />管理后台</RouterLink></div>
+    <div class="footer-links"><a v-for="link in footerLinks" :key="link.url" :href="link.url" rel="noopener noreferrer">{{ link.name }}</a><RouterLink to="/admin" class="footer-admin"><Settings :size="15" />管理后台</RouterLink></div>
   </footer>
 </template>
